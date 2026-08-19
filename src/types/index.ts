@@ -39,7 +39,7 @@ export type {
   RedeemCouponParams,
   LoyaltyTransactionParams,
   UpdatePassParams,
-  BulkUpdatePassesParams,
+  PushTemplatePassesParams,
   BatchStatusResult,
   BatchStatistics,
   GeneratedPassSummary,

@@ -263,6 +263,31 @@ export interface RedeemCouponParams {
   notes?: string;
 }
 
+/** Deduct an amount from a gift card's balance. */
+export interface RedeemGiftCardParams {
+  amount: number;
+  reason?: string;
+  redemptionChannel?: string;
+  location?: RedemptionLocation;
+}
+
+/** Check in a membership pass. Multi-use: the pass stays valid afterwards. */
+export interface MembershipCheckInParams {
+  gate?: string;
+  redemptionMethod?: string;
+  location?: RedemptionLocation;
+}
+
+/** Resolve a scanned barcode or NFC tap value and redeem it in one call. */
+export interface RedeemByScanParams {
+  scannedValue: string;
+  redemptionMethod?: string;
+  redemptionChannel?: string;
+  latitude?: number;
+  longitude?: number;
+  metadata?: Record<string, unknown>;
+}
+
 export interface LoyaltyTransactionParams {
   /** Transaction type: earn | spend */
   transactionType: 'earn' | 'spend';
@@ -277,10 +302,9 @@ export interface UpdatePassParams {
   businessContext?: BusinessContext;
 }
 
-export interface BulkUpdatePassesParams {
-  passIds: string[];
-  businessData?: Partial<BusinessData>;
-  businessContext?: BusinessContext;
+export interface PushTemplatePassesParams {
+  updatedFields: Record<string, unknown>;
+  reason?: string;
 }
 
 // ─── Batch Status ────────────────────────────────────────────────

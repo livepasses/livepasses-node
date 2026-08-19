@@ -157,17 +157,14 @@ await client.passes.update('pass-id', {
 });
 ```
 
-### Bulk update
+### Push a scoped update
 
-Update multiple passes at once:
+Push field updates to all eligible passes of a template:
 
 ```typescript
-await client.passes.bulkUpdate({
-  passIds: ['pass-1', 'pass-2', 'pass-3'],
-  businessData: { memberTier: 'Gold' },
-  businessContext: {
-    loyalty: { seasonalMessage: 'Happy holidays from our team!' },
-  },
+await client.passes.pushTemplate('template-id', {
+  updatedFields: { gate: 'Gate C' },
+  reason: 'Event-wide gate change',
 });
 ```
 

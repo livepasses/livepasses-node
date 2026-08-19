@@ -186,4 +186,72 @@ describe('PassesResource', () => {
       expect(result.passesGenerated).toBe(5);
     });
   });
+
+  describe('redeemGiftCard', () => {
+    it('should post the deduction to the giftcard redeem route', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        status: 200,
+        json: () => Promise.resolve(mockApiResponse(mockRedemptionResult)),
+        headers: new Headers(),
+      });
+      globalThis.fetch = fetchMock;
+
+      const result = await client.passes.redeemGiftCard('pass-001', { amount: 25, reason: 'Purchase' });
+
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toContain('/api/passes/pass-001/giftcard/redeem');
+      expect(JSON.parse(init.body)).toEqual({ amount: 25, reason: 'Purchase' });
+      expect(result.passId).toBe('pass-001');
+    });
+  });
+
+  describe('membershipCheckIn', () => {
+    it('should check in a membership pass', async () => {
+      mockFetchResponse(mockApiResponse(mockRedemptionResult));
+
+      const result = await client.passes.membershipCheckIn('pass-001', { gate: 'Main Entrance' });
+      expect(result.passId).toBe('pass-001');
+    });
+  });
+
+  describe('stamp / unstamp', () => {
+    // The endpoints bind a request DTO. A POST with no body carries no Content-Type, which
+    // FastEndpoints answers with 415 — so both must send an empty object, not nothing.
+    it('should send an empty body rather than none', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        status: 200,
+        json: () => Promise.resolve(mockApiResponse(mockRedemptionResult)),
+        headers: new Headers(),
+      });
+      globalThis.fetch = fetchMock;
+
+      await client.passes.stamp('pass-001');
+      const [stampUrl, stampInit] = fetchMock.mock.calls[0];
+      expect(stampUrl).toContain('/api/passes/pass-001/stamp');
+      expect(stampInit.body).toBe('{}');
+      expect(stampInit.headers['Content-Type']).toBe('application/json');
+
+      await client.passes.unstamp('pass-001');
+      const [unstampUrl, unstampInit] = fetchMock.mock.calls[1];
+      expect(unstampUrl).toContain('/api/passes/pass-001/unstamp');
+      expect(unstampInit.body).toBe('{}');
+    });
+  });
+
+  describe('redeemByScan', () => {
+    it('should post the scanned value to the resolve-and-redeem route', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        status: 200,
+        json: () => Promise.resolve(mockApiResponse(mockRedemptionResult)),
+        headers: new Headers(),
+      });
+      globalThis.fetch = fetchMock;
+
+      await client.passes.redeemByScan({ scannedValue: 'LP:abc', redemptionMethod: 'nfc' });
+
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toContain('/api/passes/redeem-by-scan');
+      expect(JSON.parse(init.body).scannedValue).toBe('LP:abc');
+    });
+  });
 });

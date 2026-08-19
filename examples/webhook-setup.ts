@@ -16,7 +16,7 @@ async function main() {
   console.log('Registering webhook...');
   const webhook = await client.webhooks.create({
     url: 'https://your-app.com/webhooks/livepasses',
-    events: ['pass.generated', 'pass.redeemed', 'pass.checked_in', 'batch.completed'],
+    events: ['pass.generated', 'pass.redeemed', 'pass.updated', 'transfer.accepted'],
   });
   console.log(`  Webhook ID: ${webhook.id}`);
   console.log(`  URL: ${webhook.url}`);

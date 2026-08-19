@@ -9,12 +9,15 @@ import type {
   PassLookupResult,
   PassValidationResult,
   UpdatePassParams,
-  BulkUpdatePassesParams,
+  PushTemplatePassesParams,
   RedeemPassParams,
   PassRedemptionResult,
   CheckInParams,
   RedeemCouponParams,
   LoyaltyTransactionParams,
+  RedeemGiftCardParams,
+  MembershipCheckInParams,
+  RedeemByScanParams,
   BatchStatusResult,
   GenerateAndWaitOptions,
 } from '../types/passes.js';
@@ -127,14 +130,23 @@ export class PassesResource {
   }
 
   /**
-   * Bulk update multiple passes.
+   * Push a scoped update to all eligible passes of a template.
    */
-  async bulkUpdate(params: BulkUpdatePassesParams): Promise<void> {
-    await this.http.post<unknown>('/api/passes/bulk-update', params);
+  async pushTemplate(templateId: string, params: PushTemplatePassesParams): Promise<void> {
+    await this.http.post<unknown>(`/api/passes/template/${templateId}/push`, params);
   }
 
   /**
-   * Redeem a pass (generic redemption).
+   * Redeem a single-use pass.
+   *
+   * Redeeming is terminal, so a pass the holder is meant to keep using must not go through
+   * here. Multi-use passes are refused with `422` / `OPERATION_NOT_ALLOWED` instead of being
+   * consumed. Use the operation built for the type:
+   *
+   * - loyalty and stamp cards: {@link stamp} (and {@link unstamp} to undo)
+   * - memberships: {@link membershipCheckIn}, which does not consume the pass
+   * - coupons that allow multiple redemptions: {@link redeemCoupon}
+   * - gift cards: {@link redeemGiftCard}, which takes the amount to deduct
    */
   async redeem(passId: string, params?: RedeemPassParams): Promise<PassRedemptionResult> {
     return this.http.post<PassRedemptionResult>(`/api/passes/${passId}/redeem`, params);
@@ -159,6 +171,53 @@ export class PassesResource {
    */
   async loyaltyTransact(passId: string, params: LoyaltyTransactionParams): Promise<PassRedemptionResult> {
     return this.http.post<PassRedemptionResult>(`/api/passes/${passId}/loyalty/transact`, params);
+  }
+
+  /**
+   * Deduct an amount from a gift card's balance. Rejected when the amount exceeds the
+   * remaining balance; the balance is left untouched in that case.
+   */
+  async redeemGiftCard(passId: string, params: RedeemGiftCardParams): Promise<PassRedemptionResult> {
+    return this.http.post<PassRedemptionResult>(`/api/passes/${passId}/giftcard/redeem`, params);
+  }
+
+  /**
+   * Check in a membership pass. Unlike an event check-in the pass is NOT consumed — it stays
+   * valid for the next visit. On a quota-limited membership the remaining uses decrement and
+   * a check-in at zero is denied.
+   */
+  async membershipCheckIn(
+    passId: string,
+    params?: MembershipCheckInParams,
+  ): Promise<PassRedemptionResult> {
+    return this.http.post<PassRedemptionResult>(`/api/passes/${passId}/membership/check-in`, params);
+  }
+
+  /**
+   * Add one stamp to the stamp card behind this pass. Repeat stamps on the same card are
+   * refused inside a short cooldown, so a double scan at the till does not award two stamps.
+   */
+  async stamp(passId: string): Promise<PassRedemptionResult> {
+    // Sends {} deliberately: the endpoint binds a request DTO, and a POST with no body carries
+    // no Content-Type, which FastEndpoints answers with 415 rather than treating as empty.
+    return this.http.post<PassRedemptionResult>(`/api/passes/${passId}/stamp`, {});
+  }
+
+  /**
+   * Take back the most recent stamp — the inverse of {@link stamp}, for correcting a mis-scan.
+   * Refused when there is nothing to undo, or when the last stamp came from an external order.
+   */
+  async unstamp(passId: string): Promise<PassRedemptionResult> {
+    // See stamp(): {} rather than no body, or the request-DTO endpoint answers 415.
+    return this.http.post<PassRedemptionResult>(`/api/passes/${passId}/unstamp`, {});
+  }
+
+  /**
+   * Resolve a scanned barcode or NFC tap value and redeem it in one call, so a scanner does
+   * not need a separate lookup round-trip first.
+   */
+  async redeemByScan(params: RedeemByScanParams): Promise<PassRedemptionResult> {
+    return this.http.post<PassRedemptionResult>('/api/passes/redeem-by-scan', params);
   }
 
   /**
