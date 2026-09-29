@@ -17,11 +17,17 @@ async function main() {
   const template = await client.templates.create({
     name: 'VIP Concert Pass',
     description: 'Premium concert ticket with VIP access',
+    // The template type is decided by which block is present: an `event` block makes an event ticket.
     businessFeatures: {
-      passType: 'event',
-      hasSeating: true,
-      hasGateInfo: true,
-      supportedPlatforms: ['apple', 'google'],
+      event: {
+        eventName: 'Aurora Music Fest',
+        eventDate: '2030-06-15T20:00:00Z',
+        venueName: 'Aurora Arena',
+        showSeatNumbers: true,
+        showGateInfo: true,
+        sectionTypes: ['VIP'],
+      },
+      branding: { primaryColor: '#1A1A1D', textColor: '#FFFFFF', brandName: 'AURORA FEST' },
     },
   });
   console.log(`  Created: ${template.id} — "${template.name}"`);
@@ -32,12 +38,11 @@ async function main() {
   const updated = await client.templates.update(template.id, {
     name: 'VIP Concert Pass v2',
     description: 'Updated premium concert ticket with backstage access',
+    // PUT merges: send only what changed; omitted event fields keep their values.
     businessFeatures: {
-      passType: 'event',
-      hasSeating: true,
-      hasGateInfo: true,
-      hasBackstageAccess: true,
-      supportedPlatforms: ['apple', 'google'],
+      event: {
+        sectionTypes: ['VIP', 'Backstage'],
+      },
     },
   });
   console.log(`  Updated: "${updated.name}"\n`);

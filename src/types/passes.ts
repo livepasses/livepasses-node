@@ -70,6 +70,11 @@ export interface BusinessData {
   currency?: string;
 
   // Loyalty-specific
+  /**
+   * Loyalty: identifies the member (max 50 chars, case-insensitive). An existing number links the
+   * pass to that member; a new one creates a member; a number belonging to someone whose phone and
+   * email both differ is refused with errorCode MEMBERSHIP_NUMBER_CONFLICT. Omit to have one generated.
+   */
   membershipNumber?: string;
   currentPoints?: number;
   memberTier?: string;
@@ -135,6 +140,10 @@ export interface GeneratedPass {
   businessData: UnifiedBusinessData;
   qrCode?: string;
   status: string;
+  /** Present when status is "failed", e.g. "MEMBERSHIP_NUMBER_CONFLICT" */
+  errorCode?: string;
+  /** Present when status is "failed" */
+  errorMessage?: string;
   analytics?: AnalyticsInfo;
 }
 
@@ -160,6 +169,11 @@ export interface UnifiedBusinessData {
   ticketType?: string;
   formattedPrice?: string;
   // Loyalty
+  /**
+   * Loyalty: identifies the member (max 50 chars, case-insensitive). An existing number links the
+   * pass to that member; a new one creates a member; a number belonging to someone whose phone and
+   * email both differ is refused with errorCode MEMBERSHIP_NUMBER_CONFLICT. Omit to have one generated.
+   */
   membershipNumber?: string;
   currentPoints?: number;
   memberTier?: string;
@@ -248,19 +262,47 @@ export interface RedemptionLocation {
   longitude?: number;
 }
 
+// The redeem-family bodies below mirror the API's request DTOs exactly: the API answers 400 for
+// any field it does not declare. There is no free-text `notes` field — put free text in
+// `metadata`, which is recorded with the redemption.
+
 export interface RedeemPassParams {
+  /** Pass types this call may redeem; anything else is refused. */
+  acceptedTypes?: string[];
+  /** How the pass was presented. Defaults to `manual`. */
+  redemptionMethod?: string;
+  redemptionChannel?: string;
   location?: RedemptionLocation;
-  notes?: string;
+  confirmationCode?: string;
+  /** Free-form string key/values recorded with the redemption. */
+  metadata?: Record<string, string>;
 }
 
 export interface CheckInParams {
+  /** Pass types this call may check in; anything else is refused. */
+  acceptedTypes?: string[];
+  gate?: string;
+  section?: string;
+  /** How the pass was presented. Defaults to `barcode_scan`. */
+  redemptionMethod?: string;
   location?: RedemptionLocation;
-  notes?: string;
+  /** Free-form string key/values recorded with the check-in. */
+  metadata?: Record<string, string>;
 }
 
 export interface RedeemCouponParams {
+  /** Pass types this call may redeem; anything else is refused. */
+  acceptedTypes?: string[];
+  /** Defaults to `in_store`. */
+  redemptionChannel?: string;
   location?: RedemptionLocation;
-  notes?: string;
+  locationId?: string;
+  transactionAmount?: number;
+  transactionCurrency?: string;
+  promoCode?: string;
+  redemptionMethod?: string;
+  /** Free-form string key/values recorded with the redemption. */
+  metadata?: Record<string, string>;
 }
 
 /** Deduct an amount from a gift card's balance. */
@@ -297,9 +339,24 @@ export interface LoyaltyTransactionParams {
 
 // ─── Update ──────────────────────────────────────────────────────
 
+/**
+ * Body of `PUT /api/passes/{id}`. Send a non-empty `updatedFields`, a non-empty `messageBody`,
+ * or both — a message-only update pushes a banner without changing any field.
+ */
 export interface UpdatePassParams {
-  businessData?: Partial<BusinessData>;
-  businessContext?: BusinessContext;
+  /**
+   * The field changes, keyed by the pass type's updatable field names
+   * (for example `validUntil`, `memberTier`, `points`).
+   */
+  updatedFields?: Record<string, unknown>;
+  /** Why the pass changed, for the audit trail. Up to 500 characters. */
+  reason?: string;
+  /** Holder-visible banner title. Up to 80 characters. */
+  messageHeader?: string;
+  /** Holder-visible banner text. Up to 2000 characters. */
+  messageBody?: string;
+  /** `false` suppresses the automatic change banner. */
+  notify?: boolean;
 }
 
 export interface PushTemplatePassesParams {

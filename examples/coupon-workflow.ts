@@ -66,7 +66,8 @@ async function main() {
     try {
       const redemption = await client.passes.redeemCoupon(passId, {
         location: { name: 'Store #42', latitude: 4.6097, longitude: -74.0817 },
-        notes: 'Applied to order #12345',
+        // Free text goes in metadata; the API refuses fields it does not declare.
+        metadata: { orderId: '12345' },
       });
       console.log(`  Previous status: ${redemption.previousStatus}`);
       console.log(`  New status: ${redemption.newStatus}`);

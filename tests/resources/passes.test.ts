@@ -238,6 +238,89 @@ describe('PassesResource', () => {
     });
   });
 
+  // #797: the API answers 400 for any body field its request DTO does not declare. These pin
+  // the exact bodies the SDK sends, so a field the server never reads cannot creep back in.
+  describe('request bodies match the API contract', () => {
+    function captureFetch() {
+      const fetchMock = vi.fn().mockResolvedValue({
+        status: 200,
+        json: () => Promise.resolve(mockApiResponse(mockRedemptionResult)),
+        headers: new Headers(),
+      });
+      globalThis.fetch = fetchMock;
+      return fetchMock;
+    }
+
+    it('update sends only updatedFields, reason, messageHeader, messageBody and notify', async () => {
+      const fetchMock = captureFetch();
+
+      await client.passes.update('pass-001', {
+        updatedFields: { points: 150, memberTier: 'Gold' },
+        reason: 'Purchase reward',
+        messageHeader: 'Points added',
+        messageBody: 'You now have 150 points.',
+        notify: true,
+      });
+
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toContain('/api/passes/pass-001');
+      expect(init.method).toBe('PUT');
+      expect(JSON.parse(init.body)).toEqual({
+        updatedFields: { points: 150, memberTier: 'Gold' },
+        reason: 'Purchase reward',
+        messageHeader: 'Points added',
+        messageBody: 'You now have 150 points.',
+        notify: true,
+      });
+    });
+
+    it('update no longer accepts businessData or businessContext', () => {
+      // Type-level: the API never read these, so update() was a silent no-op; it now 400s them.
+      // @ts-expect-error businessData is not part of UpdatePassParams
+      const withData: import('../../src/types/passes.js').UpdatePassParams = { updatedFields: {}, businessData: {} };
+      // @ts-expect-error businessContext is not part of UpdatePassParams
+      const withContext: import('../../src/types/passes.js').UpdatePassParams = { updatedFields: {}, businessContext: {} };
+      expect(withData).toBeDefined();
+      expect(withContext).toBeDefined();
+    });
+
+    it('redeem, checkIn and redeemCoupon send declared fields and no notes', async () => {
+      const fetchMock = captureFetch();
+      const location = { name: 'Main Gate', latitude: 4.6, longitude: -74.0 };
+
+      await client.passes.redeem('pass-001', { location, metadata: { note: 'Applied to order #12345' } });
+      await client.passes.checkIn('pass-001', { location, gate: 'North', section: 'A' });
+      await client.passes.redeemCoupon('pass-001', {
+        location,
+        transactionAmount: 50,
+        transactionCurrency: 'COP',
+        promoCode: 'SUMMER20',
+        metadata: { orderId: '12345' },
+      });
+
+      expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+        location,
+        metadata: { note: 'Applied to order #12345' },
+      });
+      expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ location, gate: 'North', section: 'A' });
+      expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({
+        location,
+        transactionAmount: 50,
+        transactionCurrency: 'COP',
+        promoCode: 'SUMMER20',
+        metadata: { orderId: '12345' },
+      });
+
+      // @ts-expect-error notes is not declared by the redeem endpoint
+      const redeemNotes: import('../../src/types/passes.js').RedeemPassParams = { notes: 'x' };
+      // @ts-expect-error notes is not declared by the check-in endpoint
+      const checkInNotes: import('../../src/types/passes.js').CheckInParams = { notes: 'x' };
+      // @ts-expect-error notes is not declared by the redeem-coupon endpoint
+      const couponNotes: import('../../src/types/passes.js').RedeemCouponParams = { notes: 'x' };
+      expect([redeemNotes, checkInNotes, couponNotes]).toHaveLength(3);
+    });
+  });
+
   describe('redeemByScan', () => {
     it('should post the scanned value to the resolve-and-redeem route', async () => {
       const fetchMock = vi.fn().mockResolvedValue({

@@ -10,7 +10,7 @@ export function mockApiResponse<T>(data: T, message?: string): ApiResponse<T> {
   };
 }
 
-export function mockApiError(code: string, message: string, status?: number): ApiResponse<never> {
+export function mockApiError(code: string, message: string, _status?: number): ApiResponse<never> {
   return {
     success: false,
     error: { code, message },

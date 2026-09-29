@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { HttpClient } from '../src/http.js';
-import { LivepassesError, AuthenticationError, NotFoundError, RateLimitError, ValidationError } from '../src/errors.js';
+import { LivepassesError, AuthenticationError, ForbiddenError, NotFoundError, QuotaExceededError, RateLimitError, ValidationError } from '../src/errors.js';
 
 describe('HttpClient', () => {
   let client: HttpClient;
@@ -20,10 +20,10 @@ describe('HttpClient', () => {
     vi.restoreAllMocks();
   });
 
-  function mockFetch(response: { status: number; body: unknown; headers?: Record<string, string> }) {
+  function mockFetch(response: { status: number; body?: unknown; headers?: Record<string, string>; jsonError?: Error }) {
     globalThis.fetch = vi.fn().mockResolvedValue({
       status: response.status,
-      json: () => Promise.resolve(response.body),
+      json: () => (response.jsonError ? Promise.reject(response.jsonError) : Promise.resolve(response.body)),
       headers: new Headers(response.headers ?? {}),
     });
   }
@@ -199,5 +199,94 @@ describe('HttpClient', () => {
 
     await expect(fastClient.get('/api/test')).rejects.toThrow(LivepassesError);
     await expect(fastClient.get('/api/test')).rejects.toMatchObject({ code: 'TIMEOUT' });
+  });
+
+  it('refusalWithStatusRaisesTypedErrorFromEnvelope', async () => {
+    mockFetch({
+      status: 404,
+      body: { success: false, data: null, error: { code: 'TEMPLATE_NOT_FOUND', message: 'gone' } },
+    });
+    await expect(client.get('/api/templates/x')).rejects.toMatchObject({
+      name: 'NotFoundError',
+      code: 'TEMPLATE_NOT_FOUND',
+      message: 'gone',
+    });
+  });
+
+  it('validationErrorCarriesFields', async () => {
+    mockFetch({
+      status: 400,
+      body: { success: false, error: { code: 'VALIDATION_ERROR', message: 'bad', fields: { name: ['required'] } } },
+    });
+    await expect(client.post('/api/x', {})).rejects.toMatchObject({
+      name: 'ValidationError',
+      fields: { name: ['required'] },
+    });
+  });
+
+  it('forbiddenStatusWinsOverAnUnauthorizedCode', async () => {
+    // A handler-level UNAUTHORIZED refusal answers 403 (#782): it is a permission problem, not a
+    // bad key, so it must not read as AuthenticationError.
+    mockFetch({
+      status: 403,
+      body: { success: false, data: null, error: { code: 'UNAUTHORIZED', message: 'Not allowed' } },
+    });
+    const err = await client.get('/api/x').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ForbiddenError);
+    expect(err).toMatchObject({ status: 403, code: 'UNAUTHORIZED' });
+  });
+
+  it('quotaExceededCarriesTheRealStatus', async () => {
+    mockFetch({
+      status: 422,
+      body: { success: false, data: null, error: { code: 'QUOTA_EXCEEDED', message: 'Template limit reached' } },
+    });
+    const err = await client.post('/api/templates', {}).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(QuotaExceededError);
+    expect(err).toMatchObject({ status: 422, code: 'QUOTA_EXCEEDED' });
+  });
+
+  it('typedErrorConstructorsKeepTheirOldDefaultStatus', () => {
+    // Source compatibility: constructing an error without the new trailing status still works.
+    expect(new QuotaExceededError('m', 'QUOTA_EXCEEDED').status).toBe(403);
+    expect(new ForbiddenError('m', 'FORBIDDEN').status).toBe(403);
+    expect(new ForbiddenError('m', 'FORBIDDEN', undefined, 451).status).toBe(451);
+  });
+
+  it('emptyBody401IsAuthenticationError', async () => {
+    mockFetch({ status: 401, jsonError: new SyntaxError('Unexpected end of JSON input') });
+    const err = await client.get('/api/x').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AuthenticationError);
+    expect(err).toMatchObject({ status: 401 });
+  });
+
+  it('emptyBodyErrorRaisesTypedError', async () => {
+    mockFetch({ status: 404, jsonError: new SyntaxError('Unexpected end of JSON input') });
+    await expect(client.delete('/api/webhooks/x')).rejects.toMatchObject({ name: 'NotFoundError', status: 404 });
+  });
+
+  it('retriesServerErrorOnlyForIdempotentMethods', async () => {
+    vi.useFakeTimers();
+    try {
+      const fail = {
+        status: 502,
+        json: () => Promise.resolve({ success: false, error: { code: 'EXTERNAL_SERVICE_ERROR', message: 'upstream' } }),
+        headers: new Headers(),
+      };
+
+      globalThis.fetch = vi.fn().mockResolvedValue(fail);
+      const postAssertion = expect(client.post('/api/passes/generate', {})).rejects.toMatchObject({ status: 502 });
+      await vi.runAllTimersAsync();
+      await postAssertion;
+      expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+
+      globalThis.fetch = vi.fn().mockResolvedValue(fail);
+      const getAssertion = expect(client.get('/api/passes/x')).rejects.toMatchObject({ status: 502 });
+      await vi.runAllTimersAsync();
+      await getAssertion;
+      expect(globalThis.fetch).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

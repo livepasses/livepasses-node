@@ -1,5 +1,26 @@
-import type { ApiResponse, ApiPagedResponse } from './types/common.js';
+import type { ApiResponse, ApiPagedResponse, ApiError } from './types/common.js';
 import { LivepassesError, createTypedError } from './errors.js';
+
+const IDEMPOTENT_METHODS = new Set(['GET', 'HEAD', 'PUT', 'DELETE']);
+
+async function readEnvelope<T>(response: Response): Promise<T | undefined> {
+  try {
+    return (await response.json()) as T;
+  } catch {
+    return undefined; // empty or non-JSON body (a challenge 401, a proxy 502, a 204)
+  }
+}
+
+function toError(response: Response, err?: ApiError): LivepassesError {
+  return createTypedError(
+    err?.message ?? `API request failed with status ${response.status}`,
+    response.status,
+    err?.code ?? 'GENERAL_ERROR',
+    err?.details,
+    parseRetryAfter(response),
+    err?.fields,
+  );
+}
 
 export interface HttpClientConfig {
   apiKey: string;
@@ -53,38 +74,24 @@ export class HttpClient {
 
   private async request<T>(method: string, path: string, options?: RequestOptions): Promise<T> {
     const response = await this.fetchWithRetry(method, path, options);
-    const json = (await response.json()) as ApiResponse<T>;
+    const json = await readEnvelope<ApiResponse<T>>(response);
 
-    if (!json.success) {
-      const err = json.error;
-      throw createTypedError(
-        err?.message ?? `API request failed with status ${response.status}`,
-        response.status,
-        err?.code ?? 'GENERAL_ERROR',
-        err?.details,
-        parseRetryAfter(response),
-      );
+    if (response.status >= 400 || (json !== undefined && !json.success)) {
+      throw toError(response, json?.error);
     }
 
-    return json.data as T;
+    return json?.data as T;
   }
 
   private async requestPaged<T>(method: string, path: string, options?: RequestOptions): Promise<ApiPagedResponse<T>> {
     const response = await this.fetchWithRetry(method, path, options);
-    const json = (await response.json()) as ApiPagedResponse<T>;
+    const json = await readEnvelope<ApiPagedResponse<T>>(response);
 
-    if (!json.success) {
-      const err = json.error;
-      throw createTypedError(
-        err?.message ?? `API request failed with status ${response.status}`,
-        response.status,
-        err?.code ?? 'GENERAL_ERROR',
-        err?.details,
-        parseRetryAfter(response),
-      );
+    if (response.status >= 400 || (json !== undefined && !json.success)) {
+      throw toError(response, json?.error);
     }
 
-    return json;
+    return json as ApiPagedResponse<T>;
   }
 
   private async fetchWithRetry(method: string, path: string, options?: RequestOptions): Promise<Response> {
@@ -123,8 +130,9 @@ export class HttpClient {
           continue;
         }
 
-        // Retry on 5xx (server error) — fewer retries
-        if (response.status >= 500 && attempt < Math.min(maxAttempts, 3)) {
+        // Retry on 5xx (server error) — only for idempotent methods, and fewer retries.
+        // No SDK sends an Idempotency-Key, so the gate is the HTTP method alone.
+        if (response.status >= 500 && IDEMPOTENT_METHODS.has(method.toUpperCase()) && attempt < Math.min(maxAttempts, 3)) {
           await sleep(getBackoffDelay(attempt));
           continue;
         }

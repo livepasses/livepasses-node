@@ -18,34 +18,45 @@ export class LivepassesError extends Error {
   }
 }
 
+// Every typed error carries the response's real HTTP status in `status`. The trailing `status`
+// constructor parameter is optional and defaults to the class's historical status, so code that
+// constructs these errors itself (tests, wrappers) keeps compiling unchanged.
+
 /** Thrown for 401 responses - invalid or missing API key */
 export class AuthenticationError extends LivepassesError {
-  constructor(message: string, code: string, details?: string) {
-    super(message, 401, code, details);
+  constructor(message: string, code: string, details?: string, status = 401) {
+    super(message, status, code, details);
     this.name = 'AuthenticationError';
   }
 }
 
-/** Thrown for validation errors (400) - invalid input data */
+/** Thrown for validation errors (usually 400) - invalid input data */
 export class ValidationError extends LivepassesError {
-  constructor(message: string, code: string, details?: string) {
-    super(message, 400, code, details);
+  /**
+   * Field path -> validation messages. Present only for VALIDATION_ERROR. Keys are the API's
+   * camelCase field paths, e.g. `operations[0].path`.
+   */
+  readonly fields?: Record<string, string[]>;
+
+  constructor(message: string, code: string, details?: string, fields?: Record<string, string[]>, status = 400) {
+    super(message, status, code, details);
     this.name = 'ValidationError';
+    this.fields = fields;
   }
 }
 
 /** Thrown for 403 responses - insufficient permissions */
 export class ForbiddenError extends LivepassesError {
-  constructor(message: string, code: string, details?: string) {
-    super(message, 403, code, details);
+  constructor(message: string, code: string, details?: string, status = 403) {
+    super(message, status, code, details);
     this.name = 'ForbiddenError';
   }
 }
 
 /** Thrown for 404 responses - resource not found */
 export class NotFoundError extends LivepassesError {
-  constructor(message: string, code: string, details?: string) {
-    super(message, 404, code, details);
+  constructor(message: string, code: string, details?: string, status = 404) {
+    super(message, status, code, details);
     this.name = 'NotFoundError';
   }
 }
@@ -55,25 +66,25 @@ export class RateLimitError extends LivepassesError {
   /** Seconds to wait before retrying, from Retry-After header */
   readonly retryAfter?: number;
 
-  constructor(message: string, code: string, retryAfter?: number, details?: string) {
-    super(message, 429, code, details);
+  constructor(message: string, code: string, retryAfter?: number, details?: string, status = 429) {
+    super(message, status, code, details);
     this.name = 'RateLimitError';
     this.retryAfter = retryAfter;
   }
 }
 
-/** Thrown when subscription quota is exceeded */
+/** Thrown when subscription quota is exceeded (the API answers 422) */
 export class QuotaExceededError extends LivepassesError {
-  constructor(message: string, code: string, details?: string) {
-    super(message, 403, code, details);
+  constructor(message: string, code: string, details?: string, status = 403) {
+    super(message, status, code, details);
     this.name = 'QuotaExceededError';
   }
 }
 
-/** Thrown for business rule violations */
+/** Thrown for business rule violations (usually 422) */
 export class BusinessRuleError extends LivepassesError {
-  constructor(message: string, code: string, details?: string) {
-    super(message, 422, code, details);
+  constructor(message: string, code: string, details?: string, status = 422) {
+    super(message, status, code, details);
     this.name = 'BusinessRuleError';
   }
 }
@@ -131,7 +142,9 @@ const BUSINESS_RULE_CODES: Set<string> = new Set([
 ]);
 
 /**
- * Creates a typed error from an API error code and HTTP status.
+ * Creates a typed error from an API error code and HTTP status. The status decides first for 401
+ * and 403 (a 403 carrying UNAUTHORIZED is a permission refusal, not a bad key), then the code,
+ * then the remaining statuses. Every error carries the real status.
  * @internal
  */
 export function createTypedError(
@@ -140,20 +153,25 @@ export function createTypedError(
   code: string,
   details?: string,
   retryAfter?: number,
+  fields?: Record<string, string[]>,
 ): LivepassesError {
-  if (AUTH_CODES.has(code)) return new AuthenticationError(message, code, details);
-  if (FORBIDDEN_CODES.has(code)) return new ForbiddenError(message, code, details);
-  if (VALIDATION_CODES.has(code)) return new ValidationError(message, code, details);
-  if (NOT_FOUND_CODES.has(code)) return new NotFoundError(message, code, details);
-  if (RATE_LIMIT_CODES.has(code)) return new RateLimitError(message, code, retryAfter, details);
-  if (QUOTA_CODES.has(code)) return new QuotaExceededError(message, code, details);
-  if (BUSINESS_RULE_CODES.has(code)) return new BusinessRuleError(message, code, details);
+  if (status === 401) return new AuthenticationError(message, code, details, status);
+  if (status === 403) return new ForbiddenError(message, code, details, status);
 
-  // Fallback: map by HTTP status
-  if (status === 401) return new AuthenticationError(message, code, details);
-  if (status === 403) return new ForbiddenError(message, code, details);
-  if (status === 404) return new NotFoundError(message, code, details);
-  if (status === 429) return new RateLimitError(message, code, retryAfter, details);
+  if (AUTH_CODES.has(code)) return new AuthenticationError(message, code, details, status);
+  if (FORBIDDEN_CODES.has(code)) return new ForbiddenError(message, code, details, status);
+  if (VALIDATION_CODES.has(code)) return new ValidationError(message, code, details, fields, status);
+  if (NOT_FOUND_CODES.has(code)) return new NotFoundError(message, code, details, status);
+  if (RATE_LIMIT_CODES.has(code)) return new RateLimitError(message, code, retryAfter, details, status);
+  if (QUOTA_CODES.has(code)) return new QuotaExceededError(message, code, details, status);
+  if (BUSINESS_RULE_CODES.has(code)) return new BusinessRuleError(message, code, details, status);
+
+  // Fallback: map by HTTP status. A 409 conflict has no class of its own and stays a
+  // LivepassesError carrying status 409 and the envelope's code.
+  if (status === 400) return new ValidationError(message, code, details, fields, status);
+  if (status === 404) return new NotFoundError(message, code, details, status);
+  if (status === 422) return new BusinessRuleError(message, code, details, status);
+  if (status === 429) return new RateLimitError(message, code, retryAfter, details, status);
 
   return new LivepassesError(message, status, code, details);
 }

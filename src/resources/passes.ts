@@ -123,7 +123,15 @@ export class PassesResource {
   }
 
   /**
-   * Update a pass's business data.
+   * Update fields on a single issued pass and push the change to the holder's wallet.
+   *
+   * @example
+   * ```ts
+   * await livepasses.passes.update(passId, {
+   *   updatedFields: { points: 150, memberTier: 'Gold' },
+   *   reason: 'Purchase reward',
+   * });
+   * ```
    */
   async update(passId: string, params: UpdatePassParams): Promise<void> {
     await this.http.put<unknown>(`/api/passes/${passId}`, params);

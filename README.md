@@ -146,16 +146,22 @@ const result = await client.passes.redeemCoupon('pass-id');
 
 ### Update a pass
 
-Update business data or context on an existing pass:
+Change fields on an issued pass and push the change to the holder's wallet. `updatedFields` is
+keyed by the pass type's updatable field names; `messageHeader`/`messageBody` show the holder a
+banner, and `notify: false` suppresses the automatic one. Send a non-empty `updatedFields`, a
+non-empty `messageBody`, or both.
 
 ```typescript
 await client.passes.update('pass-id', {
-  businessData: { currentPoints: 750, memberTier: 'Platinum' },
-  businessContext: {
-    loyalty: { programUpdate: 'Congratulations on reaching Platinum!' },
-  },
+  updatedFields: { points: 750, memberTier: 'Platinum' },
+  reason: 'Quarterly tier review',
+  messageHeader: 'You reached Platinum',
+  messageBody: 'Congratulations on reaching Platinum!',
 });
 ```
+
+The API refuses any body field it does not declare with a `400` naming the field — for example,
+there is no `notes` on redeem, check-in or coupon redemption; put free text in `metadata`.
 
 ### Push a scoped update
 
@@ -190,6 +196,7 @@ await client.passes.generate({
   templateId: 'loyalty-template-id',
   passes: [{
     customer: { firstName: 'Jane', lastName: 'Doe', email: 'jane@example.com' },
+    // Identifies the member — use a distinct number per person.
     businessData: { membershipNumber: 'MEM-001', currentPoints: 500, memberTier: 'Gold' },
   }],
 });
@@ -240,10 +247,14 @@ const template = await client.templates.get('template-id');
 const template = await client.templates.create({
   name: 'VIP Event Pass',
   description: 'Premium event ticket template',
+  // The block you send decides the template type: `event` makes an event ticket.
   businessFeatures: {
-    passType: 'event',
-    hasSeating: true,
-    supportedPlatforms: ['apple', 'google'],
+    event: {
+      eventName: 'Aurora Music Fest',
+      eventDate: '2030-06-15T20:00:00Z',
+      venueName: 'Aurora Arena',
+      showSeatNumbers: true,
+    },
   },
 });
 ```
@@ -270,7 +281,7 @@ await client.templates.deactivate('template-id');
 // Register a webhook
 const webhook = await client.webhooks.create({
   url: 'https://your-app.com/webhooks/livepasses',
-  events: ['pass.generated', 'pass.redeemed', 'batch.completed'],
+  events: ['pass.generated', 'pass.redeemed', 'pass.sharing_suspected'],
 });
 console.log(webhook.secret); // use this to verify webhook signatures
 
@@ -283,7 +294,7 @@ await client.webhooks.delete('webhook-id');
 
 ## Error Handling
 
-All errors are typed for precise `catch` handling:
+Every refusal the API can make answers with a real HTTP status (`400`/`403`/`404`/`409`/`422`/`429`/`500`/`502`/`503`) and the envelope `{success:false,data:null,error:{code,message,details,timestamp,traceId,fields?}}`. The SDK raises a typed error from **any** status or body — including a status-only response it can't parse as JSON, such as a challenge `401` or a proxy error. All errors are typed for precise `catch` handling:
 
 ```typescript
 import {
@@ -353,14 +364,16 @@ try {
 
 ### Exception hierarchy
 
-| Error Class | HTTP Status | When |
+| Error Class | Typical status | When |
 |-------------|------------|------|
 | `AuthenticationError` | 401 | Invalid, expired, or revoked API key |
-| `ValidationError` | 400 | Request validation failed |
+| `ValidationError` | 400 | Request validation failed — carries `fields?: Record<string, string[]>`, the field name -> validation messages map |
 | `ForbiddenError` | 403 | Insufficient permissions |
 | `NotFoundError` | 404 | Resource not found |
 | `RateLimitError` | 429 | Rate limit exceeded |
-| `QuotaExceededError` | 403 | API quota or subscription limit exceeded |
+| `QuotaExceededError` | 422 | API quota or subscription limit exceeded |
+
+The status column is the one each class usually carries; the error's `.status` is always the response's real HTTP status. A `401` is always the authentication error and a `403` always the forbidden error, whatever `error.code` says. A `409` without a mapped code, and every `5xx`, raise the base `LivepassesError`.
 | `BusinessRuleError` | 422 | Business rule violation (pass expired, already used, etc.) |
 
 ## Pagination
@@ -397,7 +410,7 @@ for await (const pass of client.passes.listAutoPaginate({ templateId: 'tpl-id' }
 
 The SDK automatically retries on:
 - **429 Too Many Requests** — honors `Retry-After` header
-- **5xx Server Errors** — exponential backoff with jitter
+- **5xx Server Errors** — exponential backoff with jitter, **only for idempotent methods** (`GET`, `HEAD`, `PUT`, `DELETE`). A `POST` or `PATCH` that hits a `5xx` is not retried — no SDK sends an `Idempotency-Key`, so a retry could re-run a non-idempotent operation.
 
 ## TypeScript
 

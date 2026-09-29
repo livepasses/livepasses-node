@@ -31,6 +31,7 @@ async function main() {
             phone: '+57300123456',
           },
           businessData: {
+            // Identifies the member — use a distinct number per person.
             membershipNumber: 'MEM-2026-001',
             currentPoints: 0,
             memberTier: 'Bronze',
@@ -76,17 +77,13 @@ async function main() {
 
   // 5. Update tier based on accumulated points
   console.log('Upgrading to Gold tier...');
+  // The points balance is already kept by loyaltyTransact above; only the tier changes here.
+  // memberTier must name a tier defined on the loyalty program.
   await client.passes.update(passId, {
-    businessData: {
-      currentPoints: 600,
-      memberTier: 'Gold',
-    },
-    businessContext: {
-      loyalty: {
-        programUpdate: 'Congratulations! You\'ve been upgraded to Gold tier!',
-        seasonalMessage: 'Enjoy double points this month!',
-      },
-    },
+    updatedFields: { memberTier: 'Gold' },
+    reason: 'Reached 600 points',
+    messageHeader: 'Welcome to Gold',
+    messageBody: 'Congratulations! You\'ve been upgraded to Gold tier!',
   });
   console.log('  Tier updated to Gold\n');
 
@@ -103,7 +100,7 @@ main().catch((err) => {
   if (err instanceof BusinessRuleError) {
     console.error(`Business rule violation: ${err.message}`);
   } else if (err instanceof LivepassesError) {
-    if (err.code === ApiErrorCodes.INSUFFICIENT_BALANCE) {
+    if (err.code === ApiErrorCodes.INSUFFICIENT_FUNDS) {
       console.error('Not enough points for this transaction');
     } else {
       console.error(`API error [${err.code}]: ${err.message}`);

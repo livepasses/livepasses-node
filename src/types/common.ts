@@ -41,6 +41,8 @@ export interface ApiError {
   details?: string;
   timestamp?: string;
   traceId?: string;
+  /** Present only on VALIDATION_ERROR: field name -> validation messages. */
+  fields?: Record<string, string[]>;
 }
 
 /**
